@@ -46,30 +46,73 @@ public:
     // Implement these functions:
     Stack()
     { // initialize the stack
+        top = nullptr;
+        count = 0;
+    }
+    ~Stack()
+    {
+        while (top != nullptr)
+        {
+            Node* old = top;
+            top = top->next;
+            delete old;
+        }
     }
     void push(const T &val)
     {
-
         // pushes the value on the stack if max limit is not reached yet.
+        if (count >= MAX_STACK_DEPTH)
+        {
+            cout << "Error : Stack overflow\n";
+            return;
+        }
+        Node* n = new Node;
+        n->data = val;
+        n->next = top;
+        top = n;
+        count++;
     }
     T pop()
     {
         // pop the top value on the stack
+        if (top == nullptr)
+        {
+            cout << "Stack is empty\n";
+            return T();
+        }
+        Node* old = top;
+        T val = old->data;
+        top = top->next;
+        delete old;
+        count--;
+        return val;
     }
     T &peek()
     {
         // returns the top value on the stack
+        return top->data;
     }
     bool isEmpty()
     {
+        return (top == nullptr);
     }
     int32_t depth()
     {
+        return count;
     }
-    int32_t snapshot_into(T out[], int32_t maxLen)
+    int32_t snapshot_into(T out[], int32_t maxLen) // int32_t = 4 byte integer
     {
         // copies every frame, top to bottom in the array given as a parameter
         // this is what buildSnapshot() call, returns count written
+        int32_t ct = 0;
+        Node* cur = top;
+        while (cur != nullptr && ct < maxLen)
+        {
+            out[ct] = cur->data;
+            cur = cur->next;
+            ct++;
+        }
+        return ct;
     }
 };
 
