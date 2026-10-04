@@ -214,18 +214,89 @@ struct PendingPatch
 bool readSourceLine(ifstream &in, string &out)
 {
     // reads the next nonblank line
+    string line;
+    while (getline(in, line))
+    {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+            line.pop_back();
+
+        size_t start = 0;
+        while (start < line.size() && line[start] == ' ')
+            start++;
+        line = line.substr(start);
+
+        if (!line.empty())
+        {
+            out = line;
+            return true;
+        }
+    }
+    return false;
 }
 string firstWord(const string &line)
 {
     // returns first word from the input string
+    size_t i = 0;
+    while (i < line.size() && line[i] != ' ')
+        i++;
+    return line.substr(0, i);
 }
 string secondWord(const string &line)
 {
     // returns the second word
+    size_t i = 0;
+    while(i < line.size() && line[i] != ' ')
+        i++;
+    while(i < line.size() && line[i] == ' ')
+        i++;
+    size_t start = i;
+    while(i < line.size() && line[i] != ' ')
+        i++;
+
+    return line.substr(start, i - start);
 }
 bool validateProgram(const char *sourcePath)
 {
     // for each func defined there should be exactly one func_end and no nested funcs allowed - 
+    ifstream in(sourcePath);
+    if(!in)
+    {
+        cout << "Error : File not found !\n";
+        return false;
+    }
+    Stack <string> st;
+    string line;
+
+    while(readSourceLine(in, line))
+    {
+        string startWord = firstWord(line);
+        if(startWord == "func")
+        {
+            if(st.isEmpty())
+                st.push(startWord);
+            else if(!st.isEmpty())
+            {
+                cout << "Error : Nested function found !\n";
+                return false;
+            }
+        }
+        else if(startWord == "func_end")
+        {
+            if(st.isEmpty())
+            {
+                cout << "Error : FOund func_end without func (i.e no starting point).\n";
+                return false;
+            }
+            st.pop();
+        }
+    }
+    if(!st.isEmpty())
+    {
+        cout << "Error : function " << st.peek() << " dont have func_end . \n";
+        return false;
+    }
+
+    return true;    
 }
 
 // PASS 0x1: RESOLVE() -> resolve.bin
