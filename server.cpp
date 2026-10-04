@@ -63,7 +63,7 @@ public:
         // pushes the value on the stack if max limit is not reached yet.
         if (count >= MAX_STACK_DEPTH)
         {
-            cout << "Error : Stack overflow\n";
+            cout << "Error : Stack overflow !\n";
             return;
         }
         Node* n = new Node;
@@ -284,7 +284,7 @@ bool validateProgram(const char *sourcePath)
         {
             if(st.isEmpty())
             {
-                cout << "Error : FOund func_end without func (i.e no starting point).\n";
+                cout << "Error : FOund func_end without func (i.e no starting point)!\n";
                 return false;
             }
             st.pop();
@@ -292,7 +292,7 @@ bool validateProgram(const char *sourcePath)
     }
     if(!st.isEmpty())
     {
-        cout << "Error : function " << st.peek() << " dont have func_end . \n";
+        cout << "Error : function " << st.peek() << " dont have func_end !\n";
         return false;
     }
 
@@ -300,14 +300,34 @@ bool validateProgram(const char *sourcePath)
 }
 
 // PASS 0x1: RESOLVE() -> resolve.bin
-int64_t writeResolveRecord(FILE *f, int64_t offsetField, const string &text)
+int64_t writeResolveRecord(ofstream &f, int64_t offsetField, const string &text)
 {
     // writes one [offset(8B)][size(4B)][string] record at the current file position
     // returns this record's own starting byte position
+    int64_t startPos = f.tellp(); // tells position of pointer in file
+    int32_t size = text.size();
+
+    f.write((char*)&offsetField, sizeof(offsetField));
+    f.write((char*)&size, sizeof(size));
+    f.write(text.c_str(), size);
+
+    return startPos;
 }
-int64_t readResolveRecord(FILE *f, string &outText)
+int64_t readResolveRecord(ifstream &f, string &outText)
 {
     // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
+    int64_t offsetField;
+    int32_t size;
+    char text[512];
+
+    if(!f.read((char*)&offsetField, sizeof(offsetField)))
+        return -1;
+
+    f.read((char*)&size, sizeof(size));
+    f.read(text, size);
+
+    outText = text;
+    return offsetField;
 }
 int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
 {
@@ -323,6 +343,65 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     // with its target's position. Patching happens after the full write
     // Returns the byte offset of main's FUNC header record.
     // if there is no main return the error 
+    ifstream in(sourcePath);
+    ofstream out(resolveBinPath, ios::binary);
+    if (!in || !out)
+    {
+        cout << "Error: cannot open files" << endl;
+        return -1;
+    }
+    string line;
+    while (readSourceLine(in, line))
+    {
+        int64_t pos = out.tellp();
+        string word = firstWord(line);
+
+        if (word == "func" && funcCount < MAX_FUNCS)
+        {
+            funcArray[funcCount].funcName = secondWord(line);
+            funcArray[funcCount].byteOffsetInResolveBin = pos;
+            funcCount++;
+        }
+        else if (word == "call" && patchCount < MAX_PATCHES)
+        {
+            patches[patchCount].byteOffsetOfOffsetField = pos;
+            patches[patchCount].targetFuncName = secondWord(line);
+            patchCount++;
+        }
+        writeResolveRecord(out, pos, line);
+    }
+    out.close();
+
+    fstream f(resolveBinPath, ios::in | ios::out | ios::binary);
+    for (int32_t i = 0; i < patchCount; i++)
+    {
+        int64_t target = -1;
+        for (int32_t j = 0; j < funcCount; j++)
+        {
+            if (funcArray[j].funcName == patches[i].targetFuncName)
+                target = funcArray[j].byteOffsetInResolveBin;
+        }
+
+        if (target == -1)
+        {
+            cout << "Error : Function is undefined for this call !'" << patches[i].targetFuncName << "'" << endl;
+            return -1;
+        }
+
+        f.seekp(patches[i].byteOffsetOfOffsetField);
+        f.write((char*)&target, sizeof(target));
+    }
+    f.close();
+
+    for (int32_t j = 0; j < funcCount; j++)
+    {
+        if (funcArray[j].funcName == "main")
+            return funcArray[j].byteOffsetInResolveBin;
+    }
+
+    cout << "Error : Main function does not exist !\n";
+    return -1;    
+
 }
 
 // PASS 0x2: EXECUTION (tokenization happens here)
