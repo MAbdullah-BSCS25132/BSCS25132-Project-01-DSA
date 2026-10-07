@@ -422,10 +422,34 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
     // instruction set = [func, func_end, call, set, add, sub, mul and div]
     // next word is identifier like name of a function, variable name
     // after identifier all are the params/arg, space separated
+    int32_t count = 0; // actual words in line
+    int32_t i = 0; // aik poori line k ander position 
+
+    while (i < line.length() && count < maxTokens)
+    {
+        while (i < line.length() && line[i] == ' ')
+            i++;
+
+        if (i == line.length())
+            break;
+            
+        int32_t start = i;
+        while (i < line.length() && line[i] != ' ')
+            i++;
+        tokens[count].text = line.substr(start, i - start);
+        if (count == 0)
+            tokens[count].type = KEYWORD;
+        else if (count == 1)
+            tokens[count].type = IDENTIFIER;
+        else
+            tokens[count].type = PARAM;
+        count++;
+    }
+    return count;
 }
 Snapshot *buildSnapshot(Stack<Frame> &callStack)
 {
-    // build the snapshot based on the callStack given
+    // build the snapshot based on the callStack givenif iwanna
 }
 void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &timeline)
 {
