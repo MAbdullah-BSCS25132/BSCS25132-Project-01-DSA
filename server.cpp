@@ -432,7 +432,7 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 
         if (i == line.length())
             break;
-            
+
         int32_t start = i;
         while (i < line.length() && line[i] != ' ')
             i++;
@@ -450,6 +450,11 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 Snapshot *buildSnapshot(Stack<Frame> &callStack)
 {
     // build the snapshot based on the callStack givenif iwanna
+    Snapshot* snap = new Snapshot;
+
+    snap->stackDepth = callStack.snapshot_into(snap->callStack, MAX_STACK_DEPTH);
+    
+    return snap;
 }
 void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &timeline)
 {
