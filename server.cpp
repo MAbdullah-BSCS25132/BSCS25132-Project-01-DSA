@@ -188,12 +188,14 @@ struct TTDBHeader
     int32_t stepCount;
     int64_t indexOffset;
 };
-void writeHeader(FILE *f, const TTDBHeader &h)
+void writeHeader(ofstream& file, const TTDBHeader &h)
 {
-    fwrite(h.magic, 1, 4, f);
-    fwrite(&h.version, sizeof(int32_t), 1, f);
+    file.write((char*)&h.magic, sizeof(char) * 4);
+    file.write((char*)&h.version, sizeof(int32_t));
 
     // placeholder for other two data members
+    file.write((char*)&h.stepCount, sizeof(int32_t));
+    file.write((char*)&h.indexOffset, sizeof(int64_t));
 }
 
 // resolve.bin - bookkeeping

@@ -16,3 +16,5 @@ __5.__ Implemented Stage # 03 "**Pass 0x2 Execution**" tokenizeLine() function i
 
 __6.__ Implemented Stage # 03 "**Pass 0x2 Execution**" buildSnapshot() function in server.cpp **[Wednesday 7-Oct-2026 11:53 PM]**
 
+__7.__ Implemented writeHeader() function in server.cpp with some customisation in parameter acc to my knowledge **[Friday 09-Oct-2026 01:21 AM]**
+
