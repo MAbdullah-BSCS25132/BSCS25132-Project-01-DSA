@@ -311,7 +311,7 @@ int64_t writeResolveRecord(ofstream &f, int64_t offsetField, const string &text)
 
     f.write((char*)&offsetField, sizeof(offsetField));
     f.write((char*)&size, sizeof(size));
-    f.write(text.c_str(), size);
+    f.write(text.c_str(), sizeof(char)*size);
 
     return startPos;
 }
@@ -326,7 +326,7 @@ int64_t readResolveRecord(ifstream &f, string &outText)
         return -1;
 
     f.read((char*)&size, sizeof(size));
-    f.read(text, size);
+    f.read(text, sizeof(char)*size);
 
     outText = text;
     return offsetField;
@@ -466,6 +466,240 @@ void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &ti
 
     // implementation:
     // execute line by line, and according to the keyword perform action
+
+    ifstream file(resolveBinPath, ios::binary);
+
+    if (!file)
+    {
+        cout << "Error : cant open resolve.bin" << endl;
+        return;
+    }
+
+    Stack<Frame> callStack;
+
+    Frame mainFrame;
+    mainFrame.func_name = "main";
+    mainFrame.argc = 0;
+    mainFrame.returnLine = -1;
+    mainFrame.localCount = 0;
+
+    callStack.push(mainFrame);
+
+    string line;
+    Token tokens[MAX_TOKENS];
+
+    file.seekg(mainOffset);
+    readResolveRecord(file, line);
+
+    while (!callStack.isEmpty())
+    {
+        int64_t linePosition = file.tellg();
+        int64_t targetOffset = readResolveRecord(file, line);
+
+        if (targetOffset == -1)
+            break;
+
+        int32_t tokenCount = tokenizeLine(line, tokens, MAX_TOKENS);
+        string command = tokens[0].text;
+
+        Frame &currentFrame = callStack.peek();
+
+        int32_t values[MAX_TOKENS] = {0};
+
+        for (int32_t i = 1; i < tokenCount; i++)
+        {
+            bool found = false;
+            for (int32_t j = 0; j < currentFrame.argc; j++)
+            {
+                if (currentFrame.argv[j].name == tokens[i].text)
+                {
+                    values[i] = currentFrame.argv[j].value;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                for (int32_t j = 0; j < currentFrame.localCount; j++)
+                {
+                    if (currentFrame.locals[j].name == tokens[i].text)
+                    {
+                        values[i] = currentFrame.locals[j].value;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found)
+            {
+                char firstChar = tokens[i].text[0];
+
+                if ((firstChar >= '0' && firstChar <= '9') || firstChar == '-')
+                {
+                    values[i] = stoi(tokens[i].text);
+                }
+            }
+        }
+
+        bool shouldStore = false;
+        int32_t result = 0;
+
+        if (command == "set")
+        {
+            result = values[2];
+            shouldStore = true;
+        }
+        else if (command == "add")
+        {
+            result = values[1] + values[2];
+            shouldStore = true;
+        }
+        else if (command == "sub")
+        {
+            result = values[1] - values[2];
+            shouldStore = true;
+        }
+        else if (command == "mul")
+        {
+            result = values[1] * values[2];
+            shouldStore = true;
+        }
+        else if (command == "div")
+        {
+            if (values[2] == 0)
+            {
+                cout << "Error: divide by zero" << endl;
+                return;
+            }
+
+            result = values[1] / values[2];
+            shouldStore = true;
+        }
+        else if (command == "call")
+        {
+            if (callStack.depth() >= MAX_STACK_DEPTH)
+            {
+                cout << "Error: stack overflow" << endl;
+                return;
+            }
+
+            file.seekg(targetOffset);
+
+            string functionLine;
+            readResolveRecord(file, functionLine);
+
+            Token functionTokens[MAX_TOKENS];
+
+            int32_t functionTokenCount = tokenizeLine(functionLine, functionTokens, MAX_TOKENS);
+
+            if (functionTokenCount != tokenCount)
+            {
+                cout << "Error : wrong number of arguments for " << tokens[1].text << endl;
+                return;
+            }
+
+            Frame newFrame;
+
+            newFrame.func_name = functionTokens[1].text;
+            newFrame.argc = tokenCount - 2;
+            newFrame.returnLine = linePosition;
+            newFrame.localCount = 0;
+
+            for (int32_t i = 0; i < newFrame.argc; i++)
+            {
+                newFrame.argv[i].name = functionTokens[i + 2].text;
+                newFrame.argv[i].value = values[i + 2];
+            }
+
+            callStack.push(newFrame);
+        }
+        else if (command == "func_end")
+        {
+            Frame finishedFrame = callStack.pop();
+
+            if (callStack.isEmpty())
+            {
+                break;
+            }
+
+            file.clear();
+            file.seekg(finishedFrame.returnLine);
+
+            string callLine;
+            readResolveRecord(file, callLine);
+
+            Token callTokens[MAX_TOKENS];
+
+            tokenizeLine(callLine, callTokens, MAX_TOKENS);
+
+            Frame &callerFrame = callStack.peek();
+
+            for (int32_t i = 0; i < finishedFrame.argc; i++)
+            {
+                string callerVariable = callTokens[i + 2].text;
+                int32_t newValue = finishedFrame.argv[i].value;
+
+                for (int32_t j = 0; j < callerFrame.argc; j++)
+                {
+                    if (callerFrame.argv[j].name == callerVariable)
+                    {
+                        callerFrame.argv[j].value = newValue;
+                    }
+                }
+
+                for (int32_t j = 0; j < callerFrame.localCount; j++)
+                {
+                    if (callerFrame.locals[j].name == callerVariable)
+                    {
+                        callerFrame.locals[j].value = newValue;
+                    }
+                }
+            }
+        }
+
+        if (shouldStore)
+        {
+            bool placed = false;
+
+            for (int32_t i = 0; i < currentFrame.argc; i++)
+            {
+                if (currentFrame.argv[i].name == tokens[1].text)
+                {
+                    currentFrame.argv[i].value = result;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed)
+            {
+                for (int32_t i = 0; i < currentFrame.localCount; i++)
+                {
+                    if (currentFrame.locals[i].name == tokens[1].text)
+                    {
+                        currentFrame.locals[i].value = result;
+                        placed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!placed && currentFrame.localCount < MAX_VARS_PER_FRAME)
+            {
+                int32_t i = currentFrame.localCount;
+
+                currentFrame.locals[i].name = tokens[1].text;
+                currentFrame.locals[i].value = result;
+
+                currentFrame.localCount++;
+            }
+        }
+
+        Snapshot *snapshot = buildSnapshot(callStack);
+        timeline.record(snapshot);
+    }
 }
 
 // PASS 0x3: SERIALIZE TIMELINE

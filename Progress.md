@@ -18,3 +18,4 @@ __6.__ Implemented Stage # 03 "**Pass 0x2 Execution**" buildSnapshot() function 
 
 __7.__ Implemented writeHeader() function in server.cpp with some customisation in parameter acc to my knowledge **[Friday 09-Oct-2026 01:21 AM]**
 
+__8.__ Implemented executeProgram() function in server.cpp **[Friday 09-Oct-2026 10:35 PM]**
