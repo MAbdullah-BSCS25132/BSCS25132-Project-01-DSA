@@ -710,7 +710,90 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
     // after timeline add the index array i the file
     // update the header
+
+    ofstream file(tdbgPath, ios::binary);
+
+    if (!file)
+    {
+        cout << "Error : cannot found file : " << tdbgPath << " ! "<< endl;
+        return;
+    }
+
+    int32_t stepCount = timeline.getStepCount();
+
+    TTDBHeader header;
+    header.magic[0] = 'T';
+    header.magic[1] = 'T';
+    header.magic[2] = 'D';
+    header.magic[3] = 'B';
+    header.version = 1;
+    header.stepCount = stepCount;
+    header.indexOffset = 0;
+
+    writeHeader(file, header);
+
+    int64_t *index = new int64_t[stepCount];
+
+    TimelineNode *node = timeline.begin();
+    int32_t step = 0;
+
+    while (node != nullptr)
+    {
+        Snapshot* snap = node->data;
+
+        index[step] = file.tellp();
+
+        file.write((char*)&snap->stackDepth, sizeof(snap->stackDepth));
+
+        for (int32_t i = 0; i < snap->stackDepth; i++)
+        {
+            Frame& fr = snap->callStack[i];
+
+            int32_t len = fr.func_name.size();
+            file.write((char*)&len, sizeof(len));
+            file.write(fr.func_name.c_str(), len);
+
+            file.write((char*)&fr.argc, sizeof(fr.argc));
+
+            for (int32_t j = 0; j < fr.argc; j++)
+            {
+                len = fr.argv[j].name.size();
+                file.write((char*)&len, sizeof(len));
+                file.write(fr.argv[j].name.c_str(), len);
+                file.write((char*)&fr.argv[j].value, sizeof(fr.argv[j].value));
+            }
+
+            file.write((char*)&fr.returnLine, sizeof(fr.returnLine));
+
+            file.write((char*)&fr.localCount, sizeof(fr.localCount));
+
+            for (int32_t j = 0; j < fr.localCount; j++)
+            {
+                len = fr.locals[j].name.size();
+                file.write((char*)&len, sizeof(len));
+                file.write(fr.locals[j].name.c_str(), len);
+                file.write((char*)&fr.locals[j].value, sizeof(fr.locals[j].value));
+            }
+        }
+
+        step++;
+        node = node->next;
+    }
+
+    int64_t indexOffset = file.tellp();
+
+    file.write((char*)index, stepCount * sizeof(int64_t));
+
+    header.indexOffset = indexOffset;
+
+    file.seekp(0);
+    writeHeader(file, header);
+
+    delete[] index;
+
+    file.close();
 }
+
 // main section
 int32_t main()
 {
@@ -718,15 +801,23 @@ int32_t main()
     if (!validateProgram("source.bin"))
     {
         // send an error response instead of a .tdbg file
+        cout << "Validation failed, session.tdbg not created !" << endl;
         return 1;
     }
 
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+    if (mainOffset == -1)
+    {
+        cout << "Resolve failed, session.tdbg not created !" << endl;
+        return 1;
+    }
 
     Timeline timeline;
     executeProgram("resolve.bin", mainOffset, timeline);
 
     writeTdbg(timeline, "session.tdbg");
+
+    cout << "session.tdbg created successfully !" << endl;
 
     return 0;
 }
