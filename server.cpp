@@ -263,7 +263,7 @@ bool validateProgram(const char *sourcePath)
     ifstream in(sourcePath);
     if(!in)
     {
-        cout << "Error : File not found !\n";
+        cout << "Error : Source file not found !\n";
         return false;
     }
     Stack <string> st;
@@ -327,6 +327,7 @@ int64_t readResolveRecord(ifstream &f, string &outText)
 
     f.read((char*)&size, sizeof(size));
     f.read(text, sizeof(char)*size);
+    text[size] = '\0';
 
     outText = text;
     return offsetField;
