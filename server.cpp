@@ -1,3 +1,8 @@
+#ifndef _WIN32
+#include <unistd.h>
+#include <sys/socket.h>
+#endif
+
 // ======================= TIME-TRAVEL DEBUGGER - SERVER TEMPLATE =======================
 
 // Pipeline this file implements, top to bottom:
