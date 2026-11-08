@@ -25,3 +25,5 @@ __9.__ Implemented wroteTdbg() function in server.cpp for Stage # 04 "**Pass 0x3
 __10.__ Firgured out helper.h data and  updated server.cpp accordingly. **[SUNDAY 08-Nov-2026 12.58 AM]**
 
 __11.__ Implemented openTBDG() function in client.cpp **[Monday 09-Nov-2026 1:30 AM]**
+
+__12.__ Implemented closeTBDG() & readSnapshotAt() function in client.cpp **[Monday 09-Nov-2026 3:14 AM]**

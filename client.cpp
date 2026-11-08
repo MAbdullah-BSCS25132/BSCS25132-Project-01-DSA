@@ -165,11 +165,108 @@ bool openTdbg(const char *path, TdbgReader &r)
 }
 void closeTdbg(TdbgReader &r)
 {
-    // Free r.index and close the file.
+    r.file.close();
+    r.index.clear();
 }
+
 Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
 {
+    if (step < 0 || step >= r.header.stepCount)
+    {
+        return nullptr;
+    }
+
+    r.file.clear();
+    r.file.seekg(r.index[step]);
+
+    Snapshot *snap = new Snapshot;
+
+    char buf[256];
+    int32_t len;
+
+    r.file.read((char *)&snap->stackDepth, sizeof(snap->stackDepth));
+
+    if (!r.file || snap->stackDepth < 0 || snap->stackDepth > MAX_STACK_DEPTH)
+    {
+        delete snap;
+        return nullptr;
+    }
+
+    for (int32_t i = 0; i < snap->stackDepth; i++)
+    {
+        Frame &fr = snap->callStack[i];
+
+        r.file.read((char *)&len, sizeof(len));
+
+        if (!r.file || len < 0 || len > 255)
+        {
+            delete snap;
+            return nullptr;
+        }
+
+        r.file.read(buf, len);
+        fr.func_name = string(buf, len);
+
+        r.file.read((char *)&fr.argc, sizeof(fr.argc));
+
+        if (!r.file || fr.argc < 0 || fr.argc > MAX_VARS_PER_FRAME)
+        {
+            delete snap;
+            return nullptr;
+        }
+
+        for (int32_t j = 0; j < fr.argc; j++)
+        {
+            r.file.read((char *)&len, sizeof(len));
+
+            if (!r.file || len < 0 || len > 255)
+            {
+                delete snap;
+                return nullptr;
+            }
+
+            r.file.read(buf, len);
+            fr.argv[j].name = string(buf, len);
+
+            r.file.read((char *)&fr.argv[j].value, sizeof(fr.argv[j].value));
+        }
+
+        r.file.read((char *)&fr.returnLine, sizeof(fr.returnLine));
+
+        r.file.read((char *)&fr.localCount, sizeof(fr.localCount));
+
+        if (!r.file || fr.localCount < 0 || fr.localCount > MAX_VARS_PER_FRAME)
+        {
+            delete snap;
+            return nullptr;
+        }
+
+        for (int32_t j = 0; j < fr.localCount; j++)
+        {
+            r.file.read((char *)&len, sizeof(len));
+
+            if (!r.file || len < 0 || len > 255)
+            {
+                delete snap;
+                return nullptr;
+            }
+
+            r.file.read(buf, len);
+            fr.locals[j].name = string(buf, len);
+
+            r.file.read((char *)&fr.locals[j].value, sizeof(fr.locals[j].value));
+        }
+    }
+
+    if (!r.file)
+    {
+        delete snap;
+        return nullptr;
+    }
+
+    return snap;
 }
+
 
 // =============================================================================================
 // PART C: THE SESSION IN MEMORY
