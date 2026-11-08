@@ -18,10 +18,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <unistd.h>
-#include <signal.h>
+#include <csignal>
+//#include <unistd.h>
+//#include <signal.h>
 #include <vector>
-#include <sys/socket.h>
+//#include <sys/socket.h>
 #include "helper.h"
 using namespace std;
 
@@ -36,42 +37,42 @@ int LB_PORT = 5000;
 
 // These two must be the same as in Phase 1
 
-const int MAX_VARS_PER_FRAME = 16;
-const int MAX_STACK_DEPTH = 64;
+//const int MAX_VARS_PER_FRAME = 16;
+//const int MAX_STACK_DEPTH = 64;
 
 
 // ---- Structs (same as Phase 1, so the file can be read back exactly as it was written) ----
-struct Variable
-{
-    string name;
-    int32_t value;
-};
-struct Frame
-{
-    string func_name;
-    int32_t argc;
-    Variable argv[MAX_VARS_PER_FRAME];
-    int32_t returnLine;
-    Variable locals[MAX_VARS_PER_FRAME];
-    int32_t localCount;
-};
-struct Snapshot
-{
-    Frame callStack[MAX_STACK_DEPTH];
-    int32_t stackDepth;
-};
-struct TTDBHeader 
-{
-    char magic[4]; // "TTDB"
-    int32_t version;
-    int32_t stepCount;
-    int64_t indexOffset;
-};
+// struct Variable
+// {
+//     string name;
+//     int32_t value;
+// };
+// struct Frame
+// {
+//     string func_name;
+//     int32_t argc;
+//     Variable argv[MAX_VARS_PER_FRAME];
+//     int32_t returnLine;
+//     Variable locals[MAX_VARS_PER_FRAME];
+//     int32_t localCount;
+// };
+// struct Snapshot
+// {
+//     Frame callStack[MAX_STACK_DEPTH];
+//     int32_t stackDepth;
+// };
+// struct TTDBHeader 
+// {
+//     char magic[4]; // "TTDB"
+//     int32_t version;
+//     int32_t stepCount;
+//     int64_t indexOffset;
+// };
 
 // ---- Structs only the client needs ----
 struct TdbgReader
 {
-    ssize_t file_index;
+    ifstream file;
     TTDBHeader header;
     vector<int64_t> index;
 };
@@ -126,6 +127,41 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 
 bool openTdbg(const char *path, TdbgReader &r)
 {
+    r.file.open(path, ios::binary);
+    if(!file)
+        return false; 
+
+    r.file.read(r.header.magic, 4);
+    r.file.read((char *)&r.header.version, sizeof(r.header.version));
+    r.file.read((char *)&r.header.stepCount, sizeof(r.header.stepCount));
+    r.file.read((char *)&r.header.indexOffset, sizeof(r.header.indexOffset));
+
+    if (!r.file)
+    {
+       r.file.close();
+       return false;
+    }
+    
+    r.file.seekg(0, ios::end);
+    int64_t fileSize = r.file.tellg();
+
+    bool magicOk = (r.header.magic[0] == 'T' && r.header.magic[1] == 'T' && r.header.magic[2] == 'D' && r.header.magic[3] == 'B');
+    if (!magicOk || r.header.stepCount <= 0 || r.header.indexOffset < 20 || r.header.indexOffset + (int64_t)r.header.stepCount * 8 != fileSize)
+    {
+        r.file.close();
+        return false;
+    }
+
+    r.index.resize(r.header.stepCount);
+    r.file.seekg(r.header.indexOffset);
+    r.file.read((char *)&r.index[0], (int64_t)r.header.stepCount * 8);
+
+    for (int32_t i = 0; i < r.header.stepCount; i++)
+    {
+        if (r.index[i] < 20 || r.index[i] >= r.header.indexOffset)
+        { ... return false; }
+    }
+    return true;
 }
 void closeTdbg(TdbgReader &r)
 {
