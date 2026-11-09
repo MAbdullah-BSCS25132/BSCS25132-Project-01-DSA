@@ -27,3 +27,15 @@ __10.__ Firgured out helper.h data and  updated server.cpp accordingly. **[SUNDA
 __11.__ Implemented openTBDG() function in client.cpp **[Monday 09-Nov-2026 1:30 AM]**
 
 __12.__ Implemented closeTBDG() & readSnapshotAt() function in client.cpp **[Monday 09-Nov-2026 3:14 AM]**
+
+__13.__ Implemented writeSnapshot() function **[Monday 09-Nov-2026 2:10 PM]**
+
+__14.__ Implemented showCUrrent() and moveBy() **[Monday 09-Nov-2026 2:50 PM]**
+
+__15.__ Implemented cmdNext() & cmdPrev() **[Monday 09-Nov-2026 3:30 PM]**
+
+__16.__ Implemented cmdJumpNext() & cmdJmpPrev() **[Monday 09-Nov-2026 4:10 PM]**
+
+__17.__ Implemented runCommand function **[Monday 09-Nov-2026 7:13 PM]** // TBH i have taken help from ai for this function, as literally i my brain stopped working and started mixing up things.... but only for the initial parts of the function....
+
+__18.__ Implemented main function in client.cpp **[Monday 09-Nov-2026 8:00 PM]**

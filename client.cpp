@@ -281,6 +281,11 @@ void closeSession(DebugSession &s)
 {
     // If active, call closeTdbg(s.reader). Then set active = false.
     // Called when the user types quit and when the input ends.
+    if(s.active_flag)
+    {
+        closeTdbg(s.reader);
+        s.active_flag = false;
+    }
 }
 
 // =============================================================================================
@@ -293,9 +298,39 @@ bool showCurrent(DebugSession &s)
 {
     // Read the snapshot at s.currentStep, call printSnapshot, delete the snapshot.
     // If readSnapshotAt returns nullptr, print "damaged .tdbg file" and return false.
+
+    Snapshot *snap = readSnapshotAt(s.reader, (int32_t)s.currentStep);
+
+    if (snap == nullptr)
+    {
+        cout << "Errored/Damaged .tdbg file" << endl;
+        return false;
+    }
+
+    printSnapshot((int32_t)s.currentStep, s.reader.header.stepCount, *snap);
+
+    delete snap;
+    return true;
+
 }
 bool moveBy(DebugSession &s, int32_t delta)
 {
+    int64_t newStep = s.currentStep + delta;
+
+    if (newStep < 0)
+    {
+        cout << "Already at the first step" << endl;
+        return false;
+    }
+
+    if (newStep >= s.reader.header.stepCount)
+    {
+        cout << "Already at the last step" << endl;
+        return false;
+    }
+
+    s.currentStep = newStep;
+    return showCurrent(s);
 }
 bool cmdStart(DebugSession &s, const string &sourcePath)
 {
@@ -307,10 +342,54 @@ bool cmdStart(DebugSession &s, const string &sourcePath)
     //    set s.currentStep = 0 and s.active = true.
     // 5. Show step 1 with showCurrent(s).
 }
-bool cmdNext(DebugSession &s) {}
-bool cmdPrv(DebugSession &s) {}
-bool cmdJmpNext(DebugSession &s, int32_t n) {}
-bool cmdJmpPrv(DebugSession &s, int32_t n) { }
+bool cmdNext(DebugSession &s)
+{
+    if (!s.active_flag)
+    {
+        cout << "No session rn. Use : start <source.bin>" << endl;
+        return false;
+    }
+    return moveBy(s, 1);
+}
+
+bool cmdPrv(DebugSession &s)
+{
+    if (!s.active_flag)
+    {
+        cout << "No session rn. Use : start <source.bin>" << endl;
+        return false;
+    }
+    return moveBy(s, -1);
+}
+bool cmdJmpNext(DebugSession &s, int32_t n)
+{
+    if (!s.active_flag)
+    {
+        cout << "No session active. Use : start <source.bin>" << endl;
+        return false;
+    }
+    if (n <= 0)
+    {
+        cout << "Jump must be a positive number" << endl;
+        return false;
+    }
+    return moveBy(s, n);
+}
+
+bool cmdJmpPrv(DebugSession &s, int32_t n)
+{
+    if (!s.active_flag)
+    {
+        cout << "No session active. Use : start <source.bin>" << endl;
+        return false;
+    }
+    if (n <= 0)
+    {
+        cout << "Jump must be a positive number" << endl;
+        return false;
+    }
+    return moveBy(s, -n);
+}
 
 // =============================================================================================
 // PART E: PRINTING
@@ -318,10 +397,41 @@ bool cmdJmpPrv(DebugSession &s, int32_t n) { }
 
 void printSnapshot(int32_t step, int32_t totalSteps, const Snapshot &s)
 {
+    cout << "Step " << step + 1 << " of " << totalSteps << endl;
+
+    for (int32_t i = s.stackDepth - 1; i >= 0; i--)
+    {
+        const Frame &f = s.callStack[i];
+
+        cout << f.func_name << "(";
+        for (int32_t j = 0; j < f.argc; j++)
+        {
+            if (j > 0)
+                cout << ", ";
+            cout << f.argv[j].name << "=" << f.argv[j].value;
+        }
+        cout << ")";
+
+        if (i == s.stackDepth - 1)
+            cout << "   <-- current";
+        cout << endl;
+
+        for (int32_t j = 0; j < f.localCount; j++)
+            cout << "    " << f.locals[j].name << " = " << f.locals[j].value << endl;
+    }
 }
 void printHelp()
 {
     // Print the commands
+
+    cout << "Commands :" << endl;
+    cout << "  start <source.bin>  :   send the program and show step 1" << endl;
+    cout << "  next                :   go one step forward" << endl;
+    cout << "  prv                 :   go one step back" << endl;
+    cout << "  jmp next <n>        :   go n steps forward" << endl;
+    cout << "  jmp prv <n>         :   go n steps back" << endl;
+    cout << "  help                :   show this list" << endl;
+    cout << "  quit / exit         :   leave the debugger" << endl;
 }
 
 // =============================================================================================
@@ -341,6 +451,79 @@ bool runCommand(DebugSession &s, const string &line, bool &quitRequested)
     //      help       -> printHelp
     //      quit, exit -> set quitRequested = true
     // 4. For anything else, or a wrong number of words, print "unknown command" and the help text, and return false.
+
+    string words[10];
+    int32_t count = 0;
+    string current = "";
+
+    for (int32_t i = 0; i < (int32_t)line.size(); i++)
+    {
+        if (line[i] == ' ' || line[i] == '\t' || line[i] == '\r')
+        {
+            if (current != "")
+            {
+                if (count < 10)
+                {
+                    words[count] = current;
+                    count++;
+                }
+                current = "";
+            }
+        }
+        else
+        {
+            current = current + line[i];
+        }
+    }
+    if (current != "" && count < 10)
+    {
+        words[count] = current;
+        count++;
+    }
+
+    int32_t first = 0;
+    if (count > 0 && words[0] == "ttdb")
+        first = 1;
+
+    int32_t n = count - first;
+    if (n == 0)
+        return false;
+
+    string cmd = words[first];
+
+    if (cmd == "start" && n == 2)
+        return cmdStart(s, words[first + 1]);
+
+    if (cmd == "next" && n == 1)
+        return cmdNext(s);
+
+    if (cmd == "prv" && n == 1)
+        return cmdPrv(s);
+
+    if (cmd == "jmp" && n == 3)
+    {
+        int32_t num = atoi(words[first + 2].c_str());
+        if (words[first + 1] == "next")
+            return cmdJmpNext(s, num);
+        if (words[first + 1] == "prv")
+            return cmdJmpPrv(s, num);
+    }
+
+    if (cmd == "help" && n == 1)
+    {
+        printHelp();
+        return true;
+    }
+
+    if ((cmd == "quit" || cmd == "exit") && n == 1)
+    {
+        quitRequested = true;
+        return true;
+    }
+
+    cout << "unknown command" << endl;
+    printHelp();
+    return false;
 }
 int main(int argc, char *argv[])
 {
@@ -355,4 +538,33 @@ int main(int argc, char *argv[])
     // After the loop: closeSession(session) and return 0.
     // Never exit the loop because of an error. Only quit or the end of the input leaves it.
 
+    if (argc >= 2)
+        LB_HOST = argv[1];
+    if (argc >= 3)
+        LB_PORT = atoi(argv[2]);
+
+    DebugSession session;
+    initSession(session);
+
+    cout << "   = = = Time - Travel Debugger = = = \n";
+    printHelp();
+
+    bool quitRequested = false;
+    string line;
+
+    while (true)
+    {
+        if (quitRequested)
+            break;
+
+        cout << "ttdb> ";
+
+        if (!getline(cin, line))
+            break;
+
+        runCommand(session, line, quitRequested);
+    }
+
+    closeSession(session);
+    return 0;
 }
