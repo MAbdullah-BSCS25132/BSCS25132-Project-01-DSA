@@ -18,8 +18,8 @@
 #include <string>
 #include <cstdint>
 #include <fstream>
-#include <unistd.h>
-#include <sys/socket.h>
+//#include <unistd.h>
+// #include <sys/socket.h>
 #include <cstdint>
 #include <cstdio>
 using namespace std;
@@ -757,31 +757,203 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
 
     file.close();
 }
-
-// main section
-int32_t main()
+bool sendAll(int sock, const char *buf, size_t n) 
 {
+    // Reply format: [status: 1 byte][sending_material][checksum: 4 bytes].
+    // send() may send fewer bytes than asked for, so keep calling it until all n bytes are sent.
+    
+    size_t sent = 0;
 
-    if (!validateProgram("source.bin"))
+    while (sent < n)
     {
-        // send an error response instead of a .tdbg file
-        cout << "Validation failed, session.tdbg not created !" << endl;
-        return 1;
+        int r = send(sock, buf + sent, n - sent, 0);
+        if (r <= 0) // 0 -> connnection closed, -1 -> error occur // r contain no of byte sent suvvessfully
+            return false;
+        sent += r;
     }
 
-    int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-    if (mainOffset == -1)
+    return true;
+}
+bool sendError(int sock, const string &message)
+{
+    // Reply format: [status: 1 byte][payload until close][checksum: 4 bytes].
+    // For an error: send one byte with value 1, then the message text. 
+    
+     
+    char status = 1;    // status = 0 mean payload ma .tbdg file ha else not i.e error i.e 1.
+
+    uint32_t crc = 0xFFFFFFFF;
+    crc = crcUpdate(crc, &status, 1);
+    crc = crcUpdate(crc, message.c_str(), (int32_t)message.size());
+    uint32_t finalCrc = ~crc;
+
+    if (!sendAll(sock, &status, 1))
+        return false;
+    if (!sendAll(sock, message.c_str(), message.size()))
+        return false;
+    if (!sendAll(sock, (char *)&finalCrc, 4))
+        return false;
+    return true;
+}
+const int LISTEN_BACKLOG = 16;
+int createListenSocket(int port)
+{ 
+    // Create a TCP socket with SOCK_CLOEXEC(flag).
+    // set SO_REUSEADDR so we can restart the load balancer right away.
+    // bind() to the port on any address, then listen(LISTEN_BACKLOG).
+    // If bind or listen fails, print the error and exit, because without this socket we cannot work.
+
+    int sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sock < 0)
     {
-        cout << "Resolve failed, session.tdbg not created !" << endl;
-        return 1;
+        cout << "could not create socket" << endl;
+        exit(1);
     }
 
-    Timeline timeline;
-    executeProgram("resolve.bin", mainOffset, timeline);
+    int yes = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
 
-    writeTdbg(timeline, "session.tdbg");
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    cout << "session.tdbg created successfully !" << endl;
+    if (bind(sock, (sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        cout << "Error: cannot bind to port " << port << endl;
+        exit(1);
+    }
 
-    return 0;
+    if (listen(sock, LISTEN_BACKLOG) < 0)
+    {
+        cout << "Error: listen failed" << endl;
+        exit(1);
+    }
+
+    return sock;
+}
+// // main section
+// int32_t main()
+// {
+
+//     if (!validateProgram("source.bin"))
+//     {
+//         // send an error response instead of a .tdbg file
+//         cout << "Validation failed, session.tdbg not created !" << endl;
+//         return 1;
+//     }
+
+//     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+//     if (mainOffset == -1)
+//     {
+//         cout << "Resolve failed, session.tdbg not created !" << endl;
+//         return 1;
+//     }
+
+//     Timeline timeline;
+//     executeProgram("resolve.bin", mainOffset, timeline);
+
+//     writeTdbg(timeline, "session.tdbg");
+
+//     cout << "session.tdbg created successfully !" << endl;
+
+//     return 0;
+// }
+int32_t main(int argc, char *argv[])
+{
+    int port = 5001;
+    if (argc >= 2)
+        port = atoi(argv[1]);
+
+    int listenSock = createListenSocket(port);
+    cout << "Server listening on port " << port << endl;
+
+    char in[IO_BUFFER_SIZE];
+    char out[IO_BUFFER_SIZE];
+
+    while (true)
+    {
+        int sock = accept(listenSock, nullptr, nullptr);
+        if (sock < 0)
+            continue;
+
+        // 1. upload lo, source.bin me likho
+        TrailerChecker checker;
+        ofstream src("source.bin", ios::binary);
+        bool gotStatus = false;
+
+        while (true)
+        {
+            int r = recv(sock, in, IO_BUFFER_SIZE, 0);
+            if (r <= 0)
+                break;
+
+            int32_t k = checker.feed(in, r, out);
+            int32_t start = 0;
+            if (!gotStatus && k > 0)
+            {
+                gotStatus = true;
+                start = 1;                      // pehla byte status hai, file me nahi
+            }
+            src.write(out + start, k - start);
+        }
+        src.close();
+
+        if (!gotStatus || !checker.verify())
+        {
+            sendError(sock, "upload checksum mismatch");
+            closeSocket(sock);
+            continue;
+        }
+
+        // 2. Phase 1
+        if (!validateProgram("source.bin"))
+        {
+            sendError(sock, "invalid program: func and func_end do not match");
+            closeSocket(sock);
+            continue;
+        }
+
+        int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+        if (mainOffset < 0)
+        {
+            sendError(sock, "no main function, or call to an undefined function");
+            closeSocket(sock);
+            continue;
+        }
+
+        Timeline timeline;
+        executeProgram("resolve.bin", mainOffset, timeline);
+        if (timeline.getStepCount() == 0)
+        {
+            sendError(sock, "program could not be executed");
+            closeSocket(sock);
+            continue;
+        }
+
+        writeTdbg(timeline, "session.tdbg");
+
+        // 3. jawab: [status 0][session.tdbg][CRC]
+        ifstream tdbg("session.tdbg", ios::binary);
+        char status = 0;
+        uint32_t crc = 0xFFFFFFFF;
+
+        sendAll(sock, &status, 1);
+        crc = crcUpdate(crc, &status, 1);
+
+        while (true)
+        {
+            tdbg.read(in, IO_BUFFER_SIZE);
+            int32_t got = (int32_t)tdbg.gcount();
+            if (got == 0)
+                break;
+            sendAll(sock, in, got);
+            crc = crcUpdate(crc, in, got);
+        }
+
+        uint32_t finalCrc = ~crc;
+        sendAll(sock, (char *)&finalCrc, 4);
+        closeSocket(sock);
+    }
 }

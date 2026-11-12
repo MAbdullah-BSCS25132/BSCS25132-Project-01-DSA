@@ -13,6 +13,7 @@
 //   next, prv, jmp -> moveBy() (Part D) -> readSnapshotAt() (Part B) -> printSnapshot() (Part E)
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cstdint>
 #include <cstdio>
@@ -29,7 +30,7 @@ using namespace std;
 // ---- Constants ----
 const char *PROGRAM_NAME = "ttdb";
 const char *PROMPT = "ttdb> ";
-const int IO_BUFFER_SIZE = 64 * 1024;     // fixed buffer for streaming files to and from the socket
+// const int IO_BUFFER_SIZE = 64 * 1024;     // fixed buffer for streaming files to and from the socket
 const char *TDBG_FILE = "ttdb_last.tdbg"; // where the downloaded .tdbg is saved
 const int MAX_JUMP = 1000000000;          // biggest n accepted by jmp
 string LB_HOST = "127.0.0.0";
@@ -91,23 +92,94 @@ bool recvAll(int sock, char *buf, size_t n)
 {
     // recv() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
     // Return false if the connection closes or fails before n bytes arrive.
+
+    size_t got = 0;
+
+    while (got < n)
+    {
+        int r = recv(sock, buf + got, n - got, 0);
+        if (r <= 0)
+            return false;
+        got = got + r;
+    }
+    return true;
 }
 bool sendAll(int sock, const char *buf, size_t n)
 {
     // send() can send fewer bytes than asked for, so keep calling it until all n bytes are sent.
     // Use the flag MSG_NOSIGNAL. Return false if the connection fails.
+
+    size_t sent = 0;
+
+    while (sent < n)
+    {
+        int r = send(sock, buf + sent, n - sent, 0);
+        if (r <= 0) // 0 -> connnection closed, -1 -> error occur // r contain no of byte sent suvvessfully
+            return false;
+        sent += r;
+    }
+
+    return true;
 }
 
-int connectToHost(const char *host, int port)
+int connectToHost(const char *host, int port) // ***
 {
     // Create a TCP socket and connect it to host:port.
     // Return the socket, or -1 if the connection fails.
+
+    int sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sock < 0)
+        return -1;
+
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = inet_addr(host);
+
+    if (connect(sock, (sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        closeSocket(sock);
+        return -1;
+    }
+    return sock;
 }
-bool uploadSource(int sock, const char *sourcePath)
+bool uploadSource(int sock, const char *sourcePath) 
 {
     // have to do checksum and then send
     // When the file is finished, call shutdown(sock, SHUT_WR). This is how the server knows the string is complete.
     // Return false if the file cannot be opened or any send fails.
+
+    ifstream file(sourcePath, ios::binary);
+    if (!file)
+        return false;
+
+    uint32_t crc = 0xFFFFFFFF;
+
+    char status = 0;
+    if (!sendAll(sock, &status, 1))
+        return false;
+    crc = crcUpdate(crc, &status, 1);
+
+    char buf[IO_BUFFER_SIZE];
+    while (true)
+    {
+        file.read(buf, IO_BUFFER_SIZE);
+        int32_t got = (int32_t)file.gcount();
+        if (got == 0)
+            break;
+
+        if (!sendAll(sock, buf, got))
+            return false;
+        crc = crcUpdate(crc, buf, got);
+    }
+
+    uint32_t finalCrc = ~crc;
+    if (!sendAll(sock, (char *)&finalCrc, 4))
+        return false;
+
+    shutdown(sock, SHUT_WR);
+    return true;
 }
 bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 {
@@ -116,6 +188,64 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
     // Status 1: collect the payload into outError. Status 0: write the payload to the file.
     // At the end call verify(). If it fails, delete the file, set outError to
     // "checksum mismatch, response corrupted" and return false.
+
+    TrailerChecker checker;
+    ofstream file(outTdbgPath, ios::binary);
+    if (!file)
+    {
+        outError = "cannot create file";
+        return false;
+    }
+
+    char in[IO_BUFFER_SIZE];
+    char out[IO_BUFFER_SIZE];
+    bool gotStatus = false;
+    char status = 0;
+    string errorText = "";
+
+    while (true)
+    {
+        int r = recv(sock, in, IO_BUFFER_SIZE, 0);
+        if (r <= 0)
+            break;
+
+        int32_t k = checker.feed(in, r, out);
+        int32_t start = 0;
+
+        if (!gotStatus && k > 0)
+        {
+            status = out[0];
+            gotStatus = true;
+            start = 1;
+        }
+
+        if (status == 0)
+            file.write(out + start, k - start);
+        else
+            errorText = errorText + string(out + start, k - start);
+    }
+
+    file.close();
+
+    if (!checker.verify())
+    {
+        remove(outTdbgPath);
+        outError = "checksum mismatch, response corrupted";
+        return false;
+    }
+    if (!gotStatus)
+    {
+        remove(outTdbgPath);
+        outError = "empty reply from server";
+        return false;
+    }
+    if (status == 1)
+    {
+        remove(outTdbgPath);
+        outError = errorText;
+        return false;
+    }
+    return true;
 }
 
 // =============================================================================================
@@ -128,7 +258,7 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 bool openTdbg(const char *path, TdbgReader &r)
 {
     r.file.open(path, ios::binary);
-    if(!file)
+    if(!r.file)
         return false; 
 
     r.file.read(r.header.magic, 4);
@@ -159,7 +289,9 @@ bool openTdbg(const char *path, TdbgReader &r)
     for (int32_t i = 0; i < r.header.stepCount; i++)
     {
         if (r.index[i] < 20 || r.index[i] >= r.header.indexOffset)
-        { ... return false; }
+        { 
+            r.file.close(); r.index.clear(); return false;
+        }
     }
     return true;
 }
@@ -341,6 +473,49 @@ bool cmdStart(DebugSession &s, const string &sourcePath)
     // 4. Only now close the old reader (if s.active), then put the new reader into s,
     //    set s.currentStep = 0 and s.active = true.
     // 5. Show step 1 with showCurrent(s).
+
+    static bool useFirst = true;
+    const char *newPath = useFirst ? TDBG_FILE : "ttdb_other.tdbg";
+
+    int sock = connectToHost(LB_HOST.c_str(), LB_PORT);
+    if (sock < 0)
+    {
+        cout << "cannot connect to the load balancer" << endl;
+        return false;
+    }
+
+    if (!uploadSource(sock, sourcePath.c_str()))
+    {
+        cout << "cannot send " << sourcePath << endl;
+        closeSocket(sock);
+        return false;
+    }
+
+    string error = "";
+    bool ok = receiveResponse(sock, newPath, error);
+    closeSocket(sock);
+    if (!ok)
+    {
+        cout << error << endl;
+        return false;
+    }
+
+    TdbgReader newReader;
+    if (!openTdbg(newPath, newReader))
+    {
+        cout << "server sent a damaged .tdbg file" << endl;
+        remove(newPath);
+        return false;
+    }
+
+    if (s.active_flag)
+        closeTdbg(s.reader);
+    s.reader = move(newReader);
+    s.currentStep = 0;
+    s.active_flag = 1;
+    useFirst = !useFirst;
+
+    return showCurrent(s);
 }
 bool cmdNext(DebugSession &s)
 {
@@ -397,9 +572,9 @@ bool cmdJmpPrv(DebugSession &s, int32_t n)
 
 void printSnapshot(int32_t step, int32_t totalSteps, const Snapshot &s)
 {
-    cout << "Step " << step + 1 << " of " << totalSteps << endl;
+     cout << "Step " << step + 1 << " of " << totalSteps << endl;
 
-    for (int32_t i = s.stackDepth - 1; i >= 0; i--)
+    for (int32_t i = 0; i < s.stackDepth; i++)
     {
         const Frame &f = s.callStack[i];
 

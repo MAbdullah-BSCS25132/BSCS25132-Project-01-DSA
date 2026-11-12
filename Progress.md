@@ -39,3 +39,26 @@ __16.__ Implemented cmdJumpNext() & cmdJmpPrev() **[Monday 09-Nov-2026 4:10 PM]*
 __17.__ Implemented runCommand function **[Monday 09-Nov-2026 7:13 PM]** // TBH i have taken help from ai for this function, as literally i my brain stopped working and started mixing up things.... but only for the initial parts of the function....
 
 __18.__ Implemented main function in client.cpp **[Monday 09-Nov-2026 8:00 PM]**
+
+__19.__ Implemented queue class in load_balancer.cpp **[Wednesday 11-Nov-2026 1:15 PM]**
+
+__20.__ Implemented sendAll() & recvAll() function in client.cpp and sendAll() in load_balancer.cpp  **[Wednesday 11-Nov-2026 3:35 PM]** 
+
+__21.__ Implemented connectToHost() in client.cpp **[Wednesday 11-Nov-2026 5:26 PM]**
+
+__22.__ Implemented uploadSourec() in client.cpp **[Wednesday 11-Nov-2026 6:56 PM]**
+
+__23.__ Implemented receiveResponse() in client.cpp **[Wednesday 11-Nov-2026 9:29 PM]**
+
+__24.__ Implemented sendAll() , sendError() & createListenSocket() **[Thursday 12-Nov-2026 7:29 PM]**
+
+__25.__ connectToServer() , startServer() **[Thursday 12-Nov-2026 9:26 PM]**
+
+__26.__ connectToServerWithWakeup() **[Thursday 12-Nov-2026 10:13 PM]**
+
+__27.__ relayOneClient() **[Thursday 12-Nov-2026 11:02 PM]**
+
+__28.__ acceptLoop() **[Thursday 12-Nov-2026 11:43 PM]**
+
+__29.__ dispatcherLoop() and main **[Thursday 12-Nov-2026 11:57 PM]**
+
